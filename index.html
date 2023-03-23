@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# AWS SNS topic ARN for alerts
+SNS_TOPIC_ARN="arn:aws:sns:ap-south-1:859110508758:Alert_Topic-1"
+
+# Email subject
+SUBJECT="Important Alert: EC2 Instance Resource Utilization"
+
+# Function to send alert through AWS SNS
+send_alert () {
+  subject=$1
+  message=$2
+
+  # Use the AWS CLI to publish the message to the SNS topic
+  aws sns publish --topic-arn "$SNS_TOPIC_ARN" --subject "$subject" --message "$message"
+}
+
+# Function to check EC2 instance resource utilization
+check_utilization () {
+  instance_id=$1
+
+  # Check the OS type
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    os=$ID
+  elif [ -f /etc/redhat-release ]; then
+    os="rhel"
+  else
+    os="unknown"
+  fi
+
+  # Check CPU utilization
+  if [ "$os" == "ubuntu" ] || [ "$os" == "rhel" ]; then
+    cpu_utilization=$(top -bn1 | awk '/Cpu/ {print $2}')
+  elif [ "$os" == "amzn" ]; then
+    cpu_utilization=$(mpstat | awk '$3 ~ /CPU/ { print $4 }')
+  else
+    cpu_utilization="Unknown"
+  fi
+
+  # Check RAM utilization
+  ram_utilization=$(free -m | awk '/Mem/ {print $3/$2 * 100.0}')
+
+  # Check disk utilization
+  disk_utilization=$(df -h | awk '/\/$/ {print $5}')
+
+  # Compose the message
+  message="<html>
+
+    <body>
+        <h3>EC2 instance utilization report</h3>
+        <table border='1' cellpadding='10'>
+            <tr>
+                <th>os</th>
+                <th>$cpu_utilization%</th>
+            </tr>
+            <tr>
+                <td>Instance ID</td>
+                <td>$instance_id</td>
+            </tr>
+            <tr>
+                <td>RAM Utilization</td>
+                <td>$ram_utilization%</td>
+            </tr>
+            <tr>
+                <td>Disk Utilization</td>
+                <td>$disk_utilization</td>
+            </tr>
+           
+        </table>
+    </body>
+    
+    </html>" 
+
+
+
+  # Send the alert
+  send_alert "$SUBJECT" "$message"
+}
+
+# Check if the AWS CLI is installed
+if ! command -v aws &> /dev/null; then
+  echo "ERROR: AWS CLI is not installed."
+  exit 1
+fi
+
+# Check if the AWS CLI is configured
+if ! aws configure list &> /dev/null; then
+  echo "ERROR: AWS CLI is not configured."
+  exit 1
+fi
+
+# List of EC2 instance IDs
+instance_ids=(i-0123456789abcdef0 i-0123456789abcdef1)
+
+# Loop through each instance and check resource utilization
+for instance_id in "${instance_ids[@]}"; do
+  check_utilization "$instance_id"
+done
